@@ -11,6 +11,7 @@ import (
 	"strings"
 )
 
+// Only respond to push to the master branch.
 var branch = "refs/heads/master"
 
 func main() {
@@ -40,7 +41,10 @@ func (r restarter) restart() {
 	print(string(out))
 }
 
-// Kill running version so it can be restarted.
+// The site is run by a script, which will run in a loop
+// and restart the site when there are changes.
+// In the event that the script itself was changed, we
+// should kill the script so that cron (or whatever) can restart it.
 func (r restarter) killScript() {
 	cmd := exec.Command("/usr/bin/bash")
 	cmd.Stdin = strings.NewReader(`su ` + r.user + ` -c 'pkill -U ` + r.user + ` -f run.sh'`)
@@ -55,7 +59,7 @@ func (r restarter) killScript() {
 
 func (r restarter) run(msg message) {
 	if msg.Ref != branch {
-		fmt.Printf("branch is %q; skipping", msg.Ref)
+		return
 	}
 	if msg.scriptUpdated() {
 		r.killScript()
@@ -63,11 +67,15 @@ func (r restarter) run(msg message) {
 	r.restart()
 }
 
+// An (extremely) simplied struct based on huge JSON
+// blob sent by GitHub.
 type message struct {
 	Ref     string   `json:"ref"`
 	Commits []commit `json:"commits"`
 }
 
+// Check whether the actual launch script in the repo
+// has been modified.
 func (m message) scriptUpdated() bool {
 	for _, c := range m.Commits {
 		for _, mod := range c.Modified {
@@ -112,11 +120,13 @@ func index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Example usage; change this.
 	rDev := restarter{user: "site", path: "/home/site/ref_site"}
 	rQA := restarter{user: "qa", path: "/home/qa/site"}
 
 	go rDev.run(msg)
 	go rQA.run(msg)
 
+	// Respond to the request.
 	fmt.Fprintf(w, "Hello, %s!", r.URL.Path[1:])
 }
